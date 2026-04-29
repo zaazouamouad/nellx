@@ -2,6 +2,7 @@
 A phishing tool is software used to deceive users by creating fake pages that mimic real websites to steal sensitive information. It works by sending malicious links to victims, who unknowingly enter their data. These methods are dangerous, often leading to account breaches, data theft, and are illegal in most countries.
 ‏
 Screenshot 📸
+<img width="719" height="1233" alt="1777442485325248739475118373901" src="https://github.com/user-attachments/assets/2a36bd61-c41d-4b66-8665-d2b8ce9ad074" />
 
 🐱 NELLX Toolkit
 ‏
